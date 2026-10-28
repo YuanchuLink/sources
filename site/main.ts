@@ -1,5 +1,1 @@
-const heading = document.querySelector("h1");
-
-if (heading) {
-  heading.textContent = "Sources";
-}
+// The Release index and all pages are generated at build time.

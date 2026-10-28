@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "bun --hot site/server.ts",
     "build": "bun run scripts/build.ts",
-    "check": "bunx tsc --noEmit && bunx biome check ."
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "check": "bun run typecheck && bun run lint"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.8",
