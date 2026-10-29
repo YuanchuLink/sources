@@ -12,7 +12,6 @@ type Release = {
   name: string | null;
   published_at: string | null;
   html_url: string;
-  body: string | null;
   assets: Asset[];
 };
 type Record = Release & {
@@ -20,9 +19,6 @@ type Record = Release & {
   version: string;
   archive: Asset;
   checksum?: string;
-  originalRepository?: string;
-  originalTag?: string;
-  originalCommit?: string;
 };
 
 function compareVersions(a: string, b: string): number {
@@ -123,44 +119,28 @@ for (const release of releases) {
     continue;
   }
   const item: Record = { ...release, project, version, archive };
-  const body = release.body ?? "";
-  const metadata = (key: string) =>
-    body
-      .match(new RegExp(`^\\s*[-*]?\\s*${key}:\\s*([^\\r\\n]+)`, "im"))?.[1]
-      ?.trim();
-  const repo = metadata("Original repository");
-  if (repo && /^[\w.-]+\/[\w.-]+$/.test(repo)) item.originalRepository = repo;
-  const tag = metadata("Original tag");
-  if (tag) item.originalTag = tag;
-  const commit = metadata("Original commit");
-  if (commit && /^[0-9a-f]{7,40}$/i.test(commit)) item.originalCommit = commit;
   const sums = release.assets.find((asset) => asset.name === "SHA256SUMS");
   if (sums) {
-    console.log(`Fetching checksum asset for ${release.tag_name}...`);
-    let response: Response;
     try {
-      response = await fetch(sums.browser_download_url, {
+      const response = await fetch(sums.browser_download_url, {
         signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok) {
         console.warn(
-          `Could not fetch SHA256SUMS for ${release.tag_name}: HTTP ${response.status}; checksum omitted.`,
+          `Could not fetch SHA256SUMS for ${release.tag_name}: HTTP ${response.status}`,
         );
       } else {
-        const content = await response.text();
-        const checksums = content
+        const checksumLine = (await response.text())
           .split(/\r?\n/)
           .map((line) => line.match(/^([a-f\d]{64})\s+\*?(.+)$/i))
-          .filter((entry): entry is RegExpMatchArray => entry !== null);
-        item.checksum = checksums
-          .find((entry) => entry[2] === filename)?.[1]
-          .toLowerCase();
-        if (!item.checksum)
-          console.warn(`No valid checksum for ${filename} in SHA256SUMS`);
+          .find((line) => line?.[2] === filename);
+        if (checksumLine) item.checksum = checksumLine[1].toLowerCase();
+        else
+          console.warn(`No valid SHA-256 entry for ${filename} in SHA256SUMS`);
       }
     } catch (error) {
       console.warn(
-        `Could not fetch SHA256SUMS for ${release.tag_name}: ${error instanceof Error ? error.message : String(error)}; checksum omitted.`,
+        `Could not fetch SHA256SUMS for ${release.tag_name}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -186,7 +166,7 @@ const esc = (s: string) =>
 const date = (value: string | null) =>
   value ? new Date(value).toISOString().slice(0, 10) : "Unknown";
 const page = (title: string, content: string, base: string) =>
-  `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="YuanchuLink public source archives"><title>${esc(title)} | Sources</title><link rel="stylesheet" href="${base}style.css"></head><body><header class="top"><a href="${base}">YuanchuLink / <strong>Sources</strong></a><span>Source archive index</span></header><main>${content}</main><footer>Source archives distributed through GitHub Releases.</footer></body></html>`;
+  `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="YuanchuLink public source archives"><title>${esc(title)} | Sources</title><link rel="stylesheet" href="${base}style.css"></head><body><div class="layout"><div class="content-area"><header class="top"><a class="brand" href="${base}"><span class="brand-name">源初计划</span><span class="brand-subtitle">sources</span></a></header><main>${content}</main><footer>Source archives distributed through GitHub Releases.</footer></div></div></body></html>`;
 const link = (href: string, text: string, cls = "") =>
   `<a${cls ? ` class="${cls}"` : ""} href="${esc(href)}">${esc(text)}</a>`;
 const writePage = async (path: string, html: string) => {
@@ -199,55 +179,33 @@ const rows = projects.length
   ? projects
       .map(
         ([id, items]) =>
-          `<tr><th scope="row">${link(`${encodeURIComponent(id)}/`, id)}</th><td>${link(`${encodeURIComponent(id)}/v${encodeURIComponent(items[0].version)}/`, `v${items[0].version}`)}</td><td>${items.length}</td></tr>`,
+          `<tr class="row"><td class="cell">${link(`${encodeURIComponent(id)}/`, id)}</td><td class="cell">${link(items[0].archive.browser_download_url, `v${items[0].version}`)}</td><td class="cell">${items.length}</td></tr>`,
       )
       .join("")
-  : `<tr><td colspan="3" class="empty">No source releases have been published yet.</td></tr>`;
+  : `<tr><td colspan="3" class="cell empty">No source releases have been published yet.</td></tr>`;
 await writePage(
   "index.html",
   page(
     "Index",
-    `<h1>YuanchuLink / Sources</h1><p class="intro">源初计划公开源代码归档与分发仓库。</p><h2>Projects</h2><div class="table-wrap"><table><thead><tr><th>Project</th><th>Latest release</th><th>Versions</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+    `<h1>yuanchulink</h1><div class="table-wrap"><table class="table"><thead><tr><th class="head" scope="col">Project</th><th class="head" scope="col">Latest release</th><th class="head" scope="col">Versions</th></tr></thead><tbody>${rows}</tbody></table></div>`,
     "./",
   ),
 );
 for (const [project, items] of projects) {
-  const projectUrl = `/${encodeURIComponent(project)}/`;
   const listing = items
     .map(
       (item) =>
-        `<li><div>${link(`v${encodeURIComponent(item.version)}/`, `v${item.version}`)}<time>${date(item.published_at)}</time></div>${link(item.archive.browser_download_url, "Download archive", "download")}</li>`,
+        `<tr class="row"><td class="cell">${link(item.archive.browser_download_url, `v${item.version}`)}</td><td class="cell"><time>${date(item.published_at)}</time></td><td class="cell"><code>${item.checksum ?? "Unavailable"}</code></td><td class="cell">${link(item.archive.browser_download_url, "Download archive", "download")}</td></tr>`,
     )
     .join("");
   await writePage(
     `${project}/index.html`,
     page(
       project,
-      `<nav>${link("/", "← All projects")}</nav><h1>${esc(project)}</h1><h2>Releases</h2><ul class="releases">${listing}</ul>`,
+      `<h1>${link("/", "yuanchulink")} / ${esc(project)}</h1><h2>Releases</h2><div class="table-wrap"><table class="table"><thead><tr><th class="head" scope="col">Version</th><th class="head" scope="col">Published</th><th class="head" scope="col">SHA-256</th><th class="head" scope="col">Archive</th></tr></thead><tbody>${listing}</tbody></table></div>`,
       "../",
     ),
   );
-  for (const item of items) {
-    const metadata = [
-      item.originalRepository &&
-        `<dt>Original repository</dt><dd>${link(`https://github.com/${item.originalRepository}`, item.originalRepository)}</dd>`,
-      item.originalTag &&
-        `<dt>Original tag</dt><dd><code>${esc(item.originalTag)}</code></dd>`,
-      item.originalCommit &&
-        `<dt>Original commit</dt><dd><code>${esc(item.originalCommit)}</code></dd>`,
-    ]
-      .filter(Boolean)
-      .join("");
-    const checksum = item.checksum
-      ? `<dt>SHA-256</dt><dd><code>${item.checksum}</code></dd>`
-      : `<dt>SHA-256</dt><dd>Not available</dd>`;
-    const content = `<nav>${link("/", "← All projects")} / ${link(projectUrl, project)}</nav><h1>${esc(project)} <span class="version">v${esc(item.version)}</span></h1><p class="muted">Published ${date(item.published_at)}</p><section class="panel"><h2>Source archive</h2><p><code>${esc(item.archive.name)}</code></p>${link(item.archive.browser_download_url, "Download official source archive", "download")}</section><dl><dt>GitHub Release</dt><dd>${link(item.html_url, "View release")}</dd>${checksum}${metadata}</dl><aside>Download the official source archive from the uploaded Release assets. GitHub-generated source archives contain the Sources repository, not the original project.</aside>`,
-      base = "../../";
-    await writePage(
-      `${project}/v${item.version}/index.html`,
-      page(`${project} v${item.version}`, content, base),
-    );
-  }
 }
 console.log(
   `Built static index for ${projects.length} projects from ${releases.length} releases.`,
